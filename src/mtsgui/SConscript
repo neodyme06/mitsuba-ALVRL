@@ -47,7 +47,7 @@ if hasQt:
         bpath = env.GetBuildPath('#src/mtsgui')
         qtInterfaces = [qtEnv.Uic5(uic) for uic in scanFiles(bpath, ['*.ui'])]
         qtResources = [qtEnv.Qrc(qrc) for qrc in scanFiles(bpath, ['*.qrc'])]
-        qtSources = scanFiles(bpath, ['*.cpp']) + qtResources + resources
+        qtSources = list(scanFiles(bpath, ['*.cpp'])) + qtResources + resources
 
         if hasCollada:
                 qtSources += converter_objects
