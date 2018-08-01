@@ -403,6 +403,7 @@ def enable_modules(self, modules, debug=False, crosscompiling=False) :
                 'QtScriptTools',
                 'QtMultimedia',
                 ]
+        validModules += ['Qt5'+m[2:] for m in validModules]
         pclessModules = [
 # in qt <= 4.3 designer and designerComponents are pcless, on qt5.4 they are not, so removed.
 #               'QtDesigner',
