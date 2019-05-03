@@ -47,6 +47,9 @@ struct BDPTConfiguration {
     size_t sampleCount;
     Vector2i cropSize;
     int rrDepth;
+    bool onlyVRLpaths;
+    bool VRLvolToSurf;
+    bool VRLvolToVol;
 
     inline BDPTConfiguration() { }
 
@@ -59,6 +62,9 @@ struct BDPTConfiguration {
         sampleCount = stream->readSize();
         cropSize = Vector2i(stream);
         rrDepth = stream->readInt();
+        onlyVRLpaths = stream->readBool();
+        VRLvolToSurf = stream->readBool();
+        VRLvolToVol = stream->readBool();
     }
 
     inline void serialize(Stream *stream) const {
@@ -70,6 +76,9 @@ struct BDPTConfiguration {
         stream->writeSize(sampleCount);
         cropSize.serialize(stream);
         stream->writeInt(rrDepth);
+        stream->writeBool(onlyVRLpaths);
+        stream->writeBool(VRLvolToSurf);
+        stream->writeBool(VRLvolToVol);
     }
 
     void dump() const {

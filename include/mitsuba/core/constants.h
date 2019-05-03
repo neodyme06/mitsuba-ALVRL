@@ -20,6 +20,10 @@
 #if !defined(__MITSUBA_CORE_CONSTANTS_H)
 #define __MITSUBA_CORE_CONSTANTS_H
 
+/* Sentinels */
+#define SIZE_T_MAX std::numeric_limits<std::size_t>::max()
+#define UINT32_T_MAX 0xffffffff
+
 /* Choice of precision */
 #ifdef DOUBLE_PRECISION
 #define Epsilon 1e-7

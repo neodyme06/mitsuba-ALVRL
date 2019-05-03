@@ -140,6 +140,10 @@ public:
         m_config.sampleDirect = props.getBoolean("sampleDirect", true);
         m_config.showWeighted = props.getBoolean("showWeighted", false);
 
+        m_config.onlyVRLpaths = props.getBoolean("onlyVRLpaths", true);
+        m_config.VRLvolToSurf = props.getBoolean("vrlVolToSurf", true);
+        m_config.VRLvolToVol = props.getBoolean("vrlVolToVol", true);
+
         #if BDPT_DEBUG == 1
         if (m_config.maxDepth == -1 || m_config.maxDepth > 6) {
             /* Limit the maximum depth when rendering image

@@ -73,15 +73,51 @@ static StatsCounter avgPathLength("Volumetric path tracer", "Average path length
  *      one of the photon mappers may be preferable.
  * }
  */
-class VolumetricPathTracer : public MonteCarloIntegrator {
+class VolumetricPathTracer : public ProgressiveMonteCarloIntegrator {
 public:
-    VolumetricPathTracer(const Properties &props) : MonteCarloIntegrator(props) { }
+    VolumetricPathTracer(const Properties &props) : ProgressiveMonteCarloIntegrator(props) {
+        m_onlyVRLpaths = props.getBoolean("onlyVRLpaths", true);
+        m_VRLvolToSurf = props.getBoolean("vrlVolToSurf", true);
+        m_VRLvolToVol = props.getBoolean("vrlVolToVol", true);
+        m_numInternalSamples = props.getInteger("internalSamples", 1);
+        m_onlySingleScatter = props.getBoolean("onlySingleScatter", false);
+    }
 
     /// Unserialize from a binary data stream
     VolumetricPathTracer(Stream *stream, InstanceManager *manager)
-     : MonteCarloIntegrator(stream, manager) { }
+            : ProgressiveMonteCarloIntegrator(stream, manager) {
+        m_onlyVRLpaths = stream->readBool();;
+        m_VRLvolToVol = stream->readBool();
+        m_VRLvolToSurf = stream->readBool();
+        m_numInternalSamples = stream->readInt();
+        m_onlySingleScatter = stream->readBool();
+    }
+    void serialize(Stream *stream, InstanceManager *manager) const {
+        ProgressiveMonteCarloIntegrator::serialize(stream, manager);
+        stream->writeBool(m_onlyVRLpaths);
+        stream->writeBool(m_VRLvolToVol);
+        stream->writeBool(m_VRLvolToSurf);
+        stream->writeInt(m_numInternalSamples);
+        stream->writeBool(m_onlySingleScatter);
+    }
 
+
+    virtual bool prepass(const Scene *scene, Sampler *sampler) {
+        return true;
+    }
+
+    /// Hack to overcome floating point errors when sampling millions of points per pixel -> accumulate a subset here already.
     Spectrum Li(const RayDifferential &r, RadianceQueryRecord &rRec) const {
+        Spectrum Li(0.0f);
+        RadianceQueryRecord rRec2;
+        for (int i = 0; i < m_numInternalSamples; i++) {
+            rRec2 = rRec;
+            Li += Li_original(r, rRec2);
+        }
+        rRec = rRec2;
+        return Li / m_numInternalSamples;
+    }
+    Spectrum Li_original(const RayDifferential &r, RadianceQueryRecord &rRec) const {
         /* Some aliases and local variables */
         const Scene *scene = rRec.scene;
         Intersection &its = rRec.its;
@@ -89,6 +125,13 @@ public:
         RayDifferential ray(r);
         Spectrum Li(0.0f);
         Float eta = 1.0f;
+
+        /* Initial specular vertices are ignored */
+        bool vrlFirstVertexOK = false; // must be volume or non-degenerate surface interaction
+        bool vrlSecondVertexOK = false; // must be volume interaction
+        // these are only relevant for depth >= 2:
+        bool prevWasDiffuseSurface = false; // non-degenerate bsdf
+        bool prevWasVolume = false;
 
         /* Perform the first ray intersection (or ignore if the
            intersection has already been provided). */
@@ -98,14 +141,27 @@ public:
         bool scattered = false;
 
         while (rRec.depth <= m_maxDepth || m_maxDepth < 0) {
+            if (m_onlyVRLpaths && (rRec.depth > 2) && !(vrlFirstVertexOK && vrlSecondVertexOK))
+                break; // path is not compatible with VRLs
+
             /* ==================================================================== */
             /*                 Radiative Transfer Equation sampling                 */
             /* ==================================================================== */
             if (rRec.medium && rRec.medium->sampleDistance(Ray(ray, 0, its.t), mRec, rRec.sampler)) {
+                if (m_onlySingleScatter)
+                    rRec.type = rRec.type & (~RadianceQueryRecord::EIndirectMediumRadiance);
+
                 /* Sample the integral
                    \int_x^y tau(x, x') [ \sigma_s \int_{S^2} \rho(\omega,\omega') L(x,\omega') d\omega' ] dx'
                 */
                 const PhaseFunction *phase = mRec.getPhaseFunction();
+
+                if (rRec.depth == 1) {
+                    if (m_VRLvolToVol)
+                        vrlFirstVertexOK = true;
+                }
+                if (rRec.depth == 2)
+                    vrlSecondVertexOK = true;
 
                 if (rRec.depth >= m_maxDepth && m_maxDepth != -1) // No more scattering events allowed
                     break;
@@ -119,7 +175,20 @@ public:
                 /* Estimate the single scattering component if this is requested */
                 DirectSamplingRecord dRec(mRec.p, mRec.time);
 
-                if (rRec.type & RadianceQueryRecord::EDirectMediumRadiance) {
+                if (rRec.type & RadianceQueryRecord::EDirectMediumRadiance
+                        &&
+                        (!m_onlyVRLpaths || (// if onlyVRLpaths, then:
+                            (rRec.depth != 1) // depth cannot be 1 (only single scattering in that case)
+                            &&
+                            (!rRec.depth==2 || ( // if depth 2 -> prev must be diffuse or volume ...
+                                (prevWasVolume || prevWasDiffuseSurface)
+                                &&
+                                // ... but only if they were requested:
+                                (!prevWasDiffuseSurface || m_VRLvolToSurf) // if diffuse -> needs to be requested
+                                &&
+                                (!prevWasVolume || m_VRLvolToVol) // if volume -> needs to be requested
+                            ))
+                        ))) {
                     int interactions = m_maxDepth - rRec.depth - 1;
 
                     Spectrum value = scene->sampleAttenuatedEmitterDirect(
@@ -167,7 +236,20 @@ public:
 
                 /* If a luminaire was hit, estimate the local illumination and
                    weight using the power heuristic */
-                if (!value.isZero() && (rRec.type & RadianceQueryRecord::EDirectMediumRadiance)) {
+                if (!value.isZero() && (rRec.type & RadianceQueryRecord::EDirectMediumRadiance)
+                        &&
+                        (!m_onlyVRLpaths || (// if onlyVRLpaths, then:
+                            (rRec.depth != 1) // depth cannot be 1 (only single scattering in that case)
+                            &&
+                            (!rRec.depth==2 || ( // if depth 2 -> prev must be diffuse or volume ...
+                                (prevWasVolume || prevWasDiffuseSurface)
+                                &&
+                                // ... but only if they were requested:
+                                (!prevWasDiffuseSurface || m_VRLvolToSurf) // if diffuse -> needs to be requested
+                                &&
+                                (!prevWasVolume || m_VRLvolToVol) // if volume -> needs to be requested
+                            ))
+                        ))) {
                     const Float emitterPdf = scene->pdfEmitterDirect(dRec);
                     Li += throughput * value * miWeight(phasePdf, emitterPdf);
                 }
@@ -180,6 +262,9 @@ public:
                 if (!(rRec.type & RadianceQueryRecord::EIndirectMediumRadiance))
                     break;
                 rRec.type = RadianceQueryRecord::ERadianceNoEmission;
+
+                prevWasVolume = true;
+                prevWasDiffuseSurface = false;
             } else {
                 /* Sample
                     tau(x, y) (Surface integral). This happens with probability mRec.pdfFailure
@@ -192,7 +277,8 @@ public:
                     /* If no intersection could be found, possibly return
                        attenuated radiance from a background luminaire */
                     if ((rRec.type & RadianceQueryRecord::EEmittedRadiance)
-                        && (!m_hideEmitters || scattered)) {
+                            && (!m_hideEmitters || scattered)
+                            && (!m_onlyVRLpaths || (vrlFirstVertexOK && vrlSecondVertexOK))) {
                         Spectrum value = throughput * scene->evalEnvironment(ray);
                         if (rRec.medium)
                             value *= rRec.medium->evalTransmittance(ray, rRec.sampler);
@@ -204,8 +290,10 @@ public:
 
                 /* Possibly include emitted radiance if requested */
                 if (its.isEmitter() && (rRec.type & RadianceQueryRecord::EEmittedRadiance)
-                    && (!m_hideEmitters || scattered))
+                        && (!m_hideEmitters || scattered)
+                        && (!m_onlyVRLpaths || (vrlFirstVertexOK && vrlSecondVertexOK))) {
                     Li += throughput * its.Le(-ray.d);
+                }
 
                 /* Include radiance from a subsurface integrator if requested */
                 if (its.hasSubsurface() && (rRec.type & RadianceQueryRecord::ESubsurfaceRadiance))
@@ -228,8 +316,8 @@ public:
                 DirectSamplingRecord dRec(its);
 
                 /* Estimate the direct illumination if this is requested */
-                if ((rRec.type & RadianceQueryRecord::EDirectSurfaceRadiance) &&
-                    (bsdf->getType() & BSDF::ESmooth)) {
+                if ((rRec.type & RadianceQueryRecord::EDirectSurfaceRadiance) && (bsdf->getType() & BSDF::ESmooth)
+                        && (!m_onlyVRLpaths || (vrlFirstVertexOK && vrlSecondVertexOK))) { // a 'last' surface interaction *must* happen *after* the second (volume) vertex
                     int interactions = m_maxDepth - rRec.depth - 1;
 
                     Spectrum value = scene->sampleAttenuatedEmitterDirect(
@@ -279,6 +367,28 @@ public:
                 if (woDotGeoN * Frame::cosTheta(bRec.wo) <= 0 && m_strictNormals)
                     break;
 
+                /* Nasty hack to make sure that specular chains starting
+                 * from the eye have no effect on the paths with
+                 * 'Volume-DiffuseSurface' or 'Volume-Volume' interactions
+                 * near the eye -- for VRL reference images */
+                if (rRec.depth == 1 && bRec.sampledType & BSDF::EDelta) {
+                    rRec.depth--; // Nasty: 'undo' initial specular vertices
+                }
+                if (m_VRLvolToSurf) {
+                    /* First vertex may be a non-degenerate surface interaction within a medium */
+                    if (rRec.depth == 1 && rRec.medium && (bRec.sampledType & BSDF::ESmooth)) {
+                        vrlFirstVertexOK = true;
+                    }
+                }
+
+                // we can set this here already (instead of at the very end), because only used for volume interactions anyway:
+                prevWasVolume = false;
+                if (bRec.sampledType & BSDF::ESmooth) {
+                    prevWasDiffuseSurface = true;
+                } else {
+                    prevWasDiffuseSurface = false;
+                }
+
                 /* Trace a ray in this direction */
                 ray = Ray(its.p, wo, ray.time);
 
@@ -306,7 +416,8 @@ public:
 
                 /* If a luminaire was hit, estimate the local illumination and
                    weight using the power heuristic */
-                if (!value.isZero() && (rRec.type & RadianceQueryRecord::EDirectSurfaceRadiance)) {
+                if (!value.isZero() && (rRec.type & RadianceQueryRecord::EDirectSurfaceRadiance)
+                        && (!m_onlyVRLpaths || (vrlFirstVertexOK && vrlSecondVertexOK))) {
                     const Float emitterPdf = (!(bRec.sampledType & BSDF::EDelta)) ?
                         scene->pdfEmitterDirect(dRec) : 0;
                     Li += throughput * value * miWeight(bsdfPdf, emitterPdf);
@@ -328,7 +439,6 @@ public:
                    while accounting for the solid angle compression at refractive
                    index boundaries. Stop with at least some probability to avoid
                    getting stuck (e.g. due to total internal reflection) */
-
                 Float q = std::min(throughput.max() * eta * eta, (Float) 0.95f);
                 if (rRec.nextSample1D() >= q)
                     break;
@@ -339,6 +449,10 @@ public:
         }
         avgPathLength.incrementBase();
         avgPathLength += rRec.depth;
+
+        if (m_onlyVRLpaths && !(vrlFirstVertexOK && vrlSecondVertexOK)) {
+            Li *= 0;
+        }
         return Li;
     }
 
@@ -378,15 +492,13 @@ public:
         while (true) {
             surface = scene->rayIntersect(ray, *its);
 
+            if (surface && (interactions == maxInteractions ||
+                !(its->getBSDF()->getType() & BSDF::ENull)))
+                /* Encountered an occluder -- zero transmittance. */
+                break;
+
             if (medium)
                 transmittance *= medium->evalTransmittance(Ray(ray, 0, its->t), sampler);
-
-            if (surface && (interactions == maxInteractions ||
-                !(its->getBSDF()->getType() & BSDF::ENull) ||
-                its->isEmitter())) {
-                /* Encountered an occluder / light source */
-                break;
-            }
 
             if (!surface)
                 break;
@@ -432,10 +544,6 @@ public:
         return pdfA / (pdfA + pdfB);
     }
 
-    void serialize(Stream *stream, InstanceManager *manager) const {
-        MonteCarloIntegrator::serialize(stream, manager);
-    }
-
     std::string toString() const {
         std::ostringstream oss;
         oss << "VolumetricPathTracer[" << endl
@@ -446,9 +554,15 @@ public:
         return oss.str();
     }
 
+    bool m_onlyVRLpaths;
+    bool m_VRLvolToVol;
+    bool m_VRLvolToSurf;
+    int m_numInternalSamples;
+    bool m_onlySingleScatter;
+
     MTS_DECLARE_CLASS()
 };
 
-MTS_IMPLEMENT_CLASS_S(VolumetricPathTracer, false, MonteCarloIntegrator)
+MTS_IMPLEMENT_CLASS_S(VolumetricPathTracer, false, ProgressiveMonteCarloIntegrator)
 MTS_EXPORT_PLUGIN(VolumetricPathTracer, "Volumetric path tracer");
 MTS_NAMESPACE_END

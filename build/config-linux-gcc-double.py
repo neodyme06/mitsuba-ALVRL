@@ -4,7 +4,7 @@ BUILDDIR       = '#build/release'
 DISTDIR        = '#dist'
 CXX            = 'g++'
 CC             = 'gcc'
-CXXFLAGS       = ['-O3', '-Wall', '-g', '-pipe', '-march=nocona', '-msse2', '-ftree-vectorize', '-mfpmath=sse', '-funsafe-math-optimizations', '-fno-rounding-math', '-fno-signaling-nans', '-fno-math-errno', '-fomit-frame-pointer', '-DMTS_DEBUG', '-DSINGLE_PRECISION', '-DSPECTRUM_SAMPLES=3', '-DMTS_SSE', '-DMTS_HAS_COHERENT_RT', '-fopenmp', '-fvisibility=hidden', '-mtls-dialect=gnu2']
+CXXFLAGS       = ['-O3', '-Wall', '-g', '-pipe', '-march=nocona', '-msse2', '-ftree-vectorize', '-mfpmath=sse', '-funsafe-math-optimizations', '-fno-rounding-math', '-fno-signaling-nans', '-fno-math-errno', '-fomit-frame-pointer', '-DMTS_DEBUG', '-DDOUBLE_PRECISION', '-DSPECTRUM_SAMPLES=3', '-fopenmp', '-fvisibility=hidden', '-mtls-dialect=gnu2']
 LINKFLAGS      = []
 SHLINKFLAGS    = ['-rdynamic', '-shared', '-fPIC', '-lstdc++']
 BASEINCLUDE    = ['#include']
@@ -19,8 +19,8 @@ XERCESLIB      = ['xerces-c']
 GLLIB          = ['GL', 'GLU', 'GLEWmx', 'Xxf86vm', 'X11']
 GLFLAGS        = ['-DGLEW_MX']
 BOOSTLIB       = ['boost_system', 'boost_filesystem', 'boost_thread', 'boost_timer']
-COLLADAINCLUDE = ['/usr/include/collada-dom2.4', '/usr/include/collada-dom2.4/1.4']
-COLLADALIB     = ['collada-dom2.4-dp']
+COLLADAINCLUDE = ['/usr/include/collada-dom', '/usr/include/collada-dom/1.4']
+COLLADALIB     = ['collada14dom', 'xml2']
 FFTWLIB        = ['fftw3_threads', 'fftw3']
 
 # The following runs a helper script to search for installed Python
@@ -33,3 +33,4 @@ import sys, os
 sys.path.append(os.path.abspath('../data/scons'))
 from detect_python import detect_python
 locals().update(detect_python())
+

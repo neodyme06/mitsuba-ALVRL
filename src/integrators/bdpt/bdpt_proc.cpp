@@ -131,6 +131,21 @@ public:
         Assert(m_pool.unused());
     }
 
+    /// Return the i'th vertex, counting from the sensor.
+    PathVertex *getVertex(int i, Path &emitterSubpath, Path &sensorSubpath, int s, int t, PathVertex *vsPred, PathVertex *vs, PathVertex *vt, PathVertex *vtPred) {
+        if (i <= t-2)
+            return sensorSubpath.vertexOrNull(i);
+        if (i == t-1)
+            return vtPred;
+        if (i == t)
+            return vt;
+        if (i == t+1)
+            return vs;
+        if (i == t+2)
+            return vsPred;
+        return emitterSubpath.vertexOrNull(s - (i - (t+1)));
+    }
+
     /// Evaluate the contributions of the given eye and light paths
     void evaluate(BDPTWorkResult *wr,
             Path &emitterSubpath, Path &sensorSubpath) {
@@ -251,6 +266,34 @@ public:
                     /* Temporarily force vertex measure to EArea. Needed to
                        handle BSDFs with diffuse + specular components */
                     vs->measure = vt->measure = EArea;
+                }
+
+                // wasteful, but slightly more easy hack than to do it more efficiently
+                if (m_config.onlyVRLpaths) {
+                    int i = 2; // skip sensor super node and sensor sample
+                    PathVertex *vTmp;
+                    // skip initial specular chain
+                    while ( (vTmp = getVertex(i, emitterSubpath, sensorSubpath, s, t, vsPred, vs, vt, vtPred)) ) {
+                        if (!(vTmp->isSurfaceInteraction() && vTmp->isDegenerate()))
+                            break; // end of specular chain
+                        i++;
+                    }
+                    if (!vTmp)
+                        continue; //path too short
+
+                    PathVertex *u = getVertex(i, emitterSubpath, sensorSubpath, s, t, vsPred, vs, vt, vtPred);
+                    PathVertex *v = getVertex(i+1, emitterSubpath, sensorSubpath, s, t, vsPred, vs, vt, vtPred);
+
+                    if (!u || !v)
+                        continue;
+                    if (!(u->isMediumInteraction() || (u->isSurfaceInteraction() && !u->isDegenerate())))
+                        continue;
+                    if (u->isMediumInteraction() && !m_config.VRLvolToVol)
+                        continue;
+                    if (u->isSurfaceInteraction() && (!m_config.VRLvolToSurf || u->isDegenerate()))
+                        continue;
+                    if (!v->isMediumInteraction())
+                        continue;
                 }
 
                 /* Attempt to connect the two endpoints, which could result in

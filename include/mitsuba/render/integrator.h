@@ -351,6 +351,15 @@ public:
     /**
      * \brief Perform the main rendering task
      *
+     * Progressively calls \c prepass() and \c renderpass() for the requested
+     * amount of passes.
+     */
+    bool render(Scene *scene, RenderQueue *queue, const RenderJob *job,
+        int sceneResID, int sensorResID, int samplerResID);
+
+    /**
+     * \brief Perform a single rendering pass
+     *
      * The work is automatically parallelized to multiple cores and
      * remote machines. The default implementation uniformly generates
      * samples on the sensor aperture and image plane as specified by
@@ -359,7 +368,13 @@ public:
      * of that pixel's radiance value. For adaptive strategies, have a look at
      * the \c adaptive plugin, which is an extension of this class.
      */
-    bool render(Scene *scene, RenderQueue *queue, const RenderJob *job,
+    bool renderpass(Scene *scene, RenderQueue *queue, const RenderJob *job,
+        int sceneResID, int sensorResID, int samplerResID);
+
+    /**
+     * \brief Gets called before every rendering pass
+     */
+    virtual bool prepass(const Scene *scene, RenderQueue *queue, const RenderJob *job,
         int sceneResID, int sensorResID, int samplerResID);
 
     /**
@@ -433,6 +448,9 @@ protected:
 protected:
     /// Used to temporarily cache a parallel process while it is in operation
     ref<ParallelProcess> m_process;
+
+    /// Number of progressive passes
+    int m_numPasses;
 };
 
 /*
@@ -459,6 +477,37 @@ protected:
     int m_rrDepth;
     bool m_strictNormals;
     bool m_hideEmitters;
+};
+
+/// Progressive integrators based on Monte Carlo back-ends
+class MTS_EXPORT_RENDER ProgressiveMonteCarloIntegrator : public MonteCarloIntegrator {
+public:
+    /// Serialize this integrator to a binary data stream
+    void serialize(Stream *stream, InstanceManager *manager) const;
+
+    /// Called before every rendering pass
+    virtual bool prepass(const Scene *scene, Sampler *sampler) = 0;
+
+    /// Return a suffix that gets appended to the pass file
+    virtual std::string passFileSuffix();
+
+    /// Perform the main rendering task
+    bool render(Scene *scene, RenderQueue *queue, const RenderJob *job,
+        int sceneResID, int sensorResID, int samplerResID);
+
+    MTS_DECLARE_CLASS()
+protected:
+    /// Create an integrator
+    ProgressiveMonteCarloIntegrator(const Properties &props);
+    /// Unserialize an integrator
+    ProgressiveMonteCarloIntegrator(Stream *stream, InstanceManager *manager);
+    /// Virtual destructor
+    virtual ~ProgressiveMonteCarloIntegrator() { }
+    void dumpPass(Scene *scene, Film *film, int pass, double prepassCpu, double prepassWall, double renderCpu, double renderWall);
+protected:
+    int m_maxPasses;
+    bool m_dumpPasses;
+    //ref<Sensor> m_internalSensor;
 };
 
 MTS_NAMESPACE_END

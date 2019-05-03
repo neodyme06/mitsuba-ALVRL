@@ -18,6 +18,8 @@ debian
 config.py
 config.log
 *.pyc
+*.so
+*.os
 
 # MSVC++-related
 build/mitsuba-msvc2017.sdf

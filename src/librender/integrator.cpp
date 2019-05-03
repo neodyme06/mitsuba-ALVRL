@@ -17,8 +17,14 @@
 */
 
 #include <mitsuba/core/statistics.h>
+#include <mitsuba/core/plugin.h>
 #include <mitsuba/render/integrator.h>
 #include <mitsuba/render/renderproc.h>
+#include <boost/timer/timer.hpp>
+#include <iomanip>
+using boost::timer::cpu_timer;
+using boost::timer::cpu_times;
+using boost::timer::nanosecond_type;
 
 MTS_NAMESPACE_BEGIN
 
@@ -43,13 +49,23 @@ void Integrator::configureSampler(const Scene *scene, Sampler *sampler) {
 const Integrator *Integrator::getSubIntegrator(int idx) const { return NULL; }
 
 SamplingIntegrator::SamplingIntegrator(const Properties &props)
- : Integrator(props) { }
+ : Integrator(props) {
+    m_numPasses = props.getInteger("numPasses", 1);
+}
 
 SamplingIntegrator::SamplingIntegrator(Stream *stream, InstanceManager *manager)
- : Integrator(stream, manager) { }
+ : Integrator(stream, manager) {
+    m_numPasses = stream->readInt();
+}
 
 void SamplingIntegrator::serialize(Stream *stream, InstanceManager *manager) const {
     Integrator::serialize(stream, manager);
+    stream->writeInt(m_numPasses);
+}
+
+bool SamplingIntegrator::prepass(const Scene *scene, RenderQueue *queue, const RenderJob *job,
+    int sceneResID, int sensorResID, int samplerResID) {
+    return true;
 }
 
 Spectrum SamplingIntegrator::E(const Scene *scene, const Intersection &its,
@@ -93,6 +109,60 @@ void SamplingIntegrator::cancel() {
 }
 
 bool SamplingIntegrator::render(Scene *scene,
+        RenderQueue *queue, const RenderJob *job,
+        int sceneResID, int sensorResID, int samplerResID) {
+    ref<Scheduler> sched = Scheduler::getInstance();
+    ref<Sensor> sensor = static_cast<Sensor *>(sched->getResource(sensorResID));
+    ref<Film> film = sensor->getFilm();
+    Sampler *sampler = static_cast<Sampler *>(sched->getResource(samplerResID, 0));
+
+    bool success = true;
+
+    int pass = 1;
+    sampler->generate(Point2i(0));
+    double prepassCpu = 0;
+    double prepassWall = 0;
+    double renderCpu = 0;
+    double renderWall = 0;
+    while (m_numPasses < 0 || pass <= m_numPasses) {
+        if (m_numPasses != 1)
+            Log(EInfo, "Starting prepass %d", pass);
+        else
+            Log(EInfo, "Starting prepass");
+        cpu_timer timer;
+
+        success = prepass(scene, queue, job, sceneResID, sensorResID, samplerResID);
+        if (!success) break;
+
+        const cpu_times elapsedPrepass(timer.elapsed());
+        prepassCpu += (elapsedPrepass.system + elapsedPrepass.user) * 1e-9;
+        prepassWall += elapsedPrepass.wall * 1e-9;
+        if (m_numPasses != 1)
+            Log(EInfo, "Ended prepass %d, cumulative prepass time: %es (cpu: %es)", pass, prepassWall, prepassCpu);
+        else
+            Log(EInfo, "Ended prepass, cumulative prepass time: %es (cpu: %es)", prepassWall, prepassCpu);
+
+        //film->clear(); // DEBUG (to see each individual pass)
+        success = renderpass(scene, queue, job, sceneResID, sensorResID, samplerResID);
+        if (!success) break;
+
+        const cpu_times elapsedRender(timer.elapsed());
+        renderCpu += (elapsedRender.system + elapsedRender.user
+                - (elapsedPrepass.system + elapsedPrepass.user)) * 1e-9;
+        renderWall += (elapsedRender.wall - elapsedPrepass.wall) * 1e-9;
+        if (m_numPasses != 1)
+            Log(EInfo, "Ended render pass %d, cumulative render time: %es (cpu: %es)", pass, renderWall, renderCpu);
+        else
+            Log(EInfo, "Ended render pass, cumulative render time: %es (cpu: %es)", renderWall, renderCpu);
+
+        pass++;
+        sampler->advance();
+    }
+
+    return success;
+}
+
+bool SamplingIntegrator::renderpass(Scene *scene,
         RenderQueue *queue, const RenderJob *job,
         int sceneResID, int sensorResID, int samplerResID) {
     ref<Scheduler> sched = Scheduler::getInstance();
@@ -166,9 +236,16 @@ void SamplingIntegrator::renderBlock(const Scene *scene,
 
         sampler->generate(offset);
 
+        Spectrum accum(0.0f);
         for (size_t j = 0; j<sampler->getSampleCount(); j++) {
             rRec.newQuery(queryType, sensor->getMedium());
-            Point2 samplePos(Point2(offset) + Vector2(rRec.nextSample2D()));
+            Vector2 pixelOffset;
+            if (sampler->getSampleCount() == 1) {
+                pixelOffset = Vector2(0.5f);
+            } else {
+                pixelOffset = Vector2(rRec.nextSample2D());
+            }
+            Point2 samplePos = Point2(offset) + pixelOffset;
 
             if (needsApertureSample)
                 apertureSample = rRec.nextSample2D();
@@ -181,9 +258,12 @@ void SamplingIntegrator::renderBlock(const Scene *scene,
             sensorRay.scaleDifferential(diffScaleFactor);
 
             spec *= Li(sensorRay, rRec);
+            accum += spec;
             block->put(samplePos, spec, rRec.alpha);
             sampler->advance();
         }
+        accum *= (1.0f)/sampler->getSampleCount();
+        //Log(EDebug, "Li result: %f", accum.getLuminance());
     }
 }
 
@@ -263,8 +343,107 @@ std::string RadianceQueryRecord::toString() const {
     return oss.str();
 }
 
+ProgressiveMonteCarloIntegrator::ProgressiveMonteCarloIntegrator(const Properties &props)
+        : MonteCarloIntegrator(props) {
+    m_maxPasses = props.getInteger("maxPasses", 1);
+    m_dumpPasses = props.getBoolean("dumpPasses", false);
+}
+ProgressiveMonteCarloIntegrator::ProgressiveMonteCarloIntegrator(Stream *stream, InstanceManager *manager)
+        : MonteCarloIntegrator(stream, manager) {
+    m_maxPasses = stream->readInt();
+    m_dumpPasses = stream->readBool();
+}
+void ProgressiveMonteCarloIntegrator::serialize(Stream *stream, InstanceManager *manager) const {
+    MonteCarloIntegrator::serialize(stream, manager);
+    stream->writeInt(m_maxPasses);
+    stream->writeBool(m_dumpPasses);
+}
+void ProgressiveMonteCarloIntegrator::dumpPass(
+        Scene *scene, Film *film, int pass,
+        double prepassCpu, double prepassWall,
+        double renderCpu, double renderWall) {
+    const fs::path origFile = scene->getDestinationFile();
+    fs::path passFile(origFile);
+    std::stringstream suffix;
+    suffix << "_pass" << std::setfill('0') << std::setw(3) << pass
+            << std::fixed << std::scientific << std::setprecision(4)
+            << "_precpu" << prepassCpu << "_prewall" << prepassWall
+            << "_rencpu" << renderCpu << "_renwall" << renderWall
+            << passFileSuffix() << ".blahExtensionTODO";
+    passFile += suffix.str();
+    film->setDestinationFile(passFile, scene->getBlockSize());
+    Log(EInfo, "Writing pass file to %s", passFile.c_str());
+    film->develop(scene, 0);
+    film->setDestinationFile(origFile, scene->getBlockSize());
+}
+
+bool ProgressiveMonteCarloIntegrator::render(Scene *scene,
+        RenderQueue *queue, const RenderJob *job,
+        int sceneResID, int sensorResID, int samplerResID) {
+    ref<Scheduler> sched = Scheduler::getInstance();
+    ref<Sensor> sensor = static_cast<Sensor *>(sched->getResource(sensorResID));
+    ref<Film> film = sensor->getFilm();
+    Sampler *sampler = static_cast<Sampler *>(sched->getResource(samplerResID, 0));
+
+    bool success = true;
+
+    int pass = 1;
+    sampler->generate(Point2i(0));
+    double prepassCpu = 0;
+    double prepassWall = 0;
+    double renderCpu = 0;
+    double renderWall = 0;
+    while (m_maxPasses < 0 || pass <= m_maxPasses) {
+        if (m_maxPasses != 1)
+            Log(EInfo, "Starting prepass %d", pass);
+        else
+            Log(EInfo, "Starting prepass");
+        cpu_timer timer;
+
+        success = prepass(scene, sampler);
+        if (!success) break;
+
+        const cpu_times elapsedPrepass(timer.elapsed());
+        prepassCpu += (elapsedPrepass.system + elapsedPrepass.user) * 1e-9;
+        prepassWall += elapsedPrepass.wall * 1e-9;
+        if (m_maxPasses != 1)
+            Log(EInfo, "Ended prepass %d, cumulative prepass time: %es (cpu: %es)", pass, prepassWall, prepassCpu);
+        else
+            Log(EInfo, "Ended prepass, cumulative prepass time: %es (cpu: %es)", prepassWall, prepassCpu);
+
+        //film->clear(); // DEBUG (to see each individual pass)
+        success = MonteCarloIntegrator::render(scene, queue, job, sceneResID, sensorResID, samplerResID);
+        if (!success) break;
+
+        const cpu_times elapsedRender(timer.elapsed());
+        renderCpu += (elapsedRender.system + elapsedRender.user
+                - (elapsedPrepass.system + elapsedPrepass.user)) * 1e-9;
+        renderWall += (elapsedRender.wall - elapsedPrepass.wall) * 1e-9;
+        if (m_maxPasses != 1)
+            Log(EInfo, "Ended render pass %d, cumulative render time: %es (cpu: %es)", pass, renderWall, renderCpu);
+        else
+            Log(EInfo, "Ended render pass, cumulative render time: %es (cpu: %es)", renderWall, renderCpu);
+
+        if (m_maxPasses < 0 && m_dumpPasses) {
+            dumpPass(scene, film.get(), pass, prepassCpu, prepassWall, renderCpu, renderWall);
+        }
+
+        pass++;
+        sampler->advance();
+    }
+    pass--;
+    if (m_maxPasses >= 0 && m_dumpPasses) { // only dump last pass for now if m_maxPasses >= 0
+        dumpPass(scene, film.get(), pass, prepassCpu, prepassWall, renderCpu, renderWall);
+    }
+
+    return success;
+}
+std::string ProgressiveMonteCarloIntegrator::passFileSuffix() {
+    return "";
+}
 
 MTS_IMPLEMENT_CLASS(Integrator, true, NetworkedObject)
 MTS_IMPLEMENT_CLASS(SamplingIntegrator, true, Integrator)
 MTS_IMPLEMENT_CLASS(MonteCarloIntegrator, true, SamplingIntegrator)
+MTS_IMPLEMENT_CLASS(ProgressiveMonteCarloIntegrator, true, MonteCarloIntegrator)
 MTS_NAMESPACE_END

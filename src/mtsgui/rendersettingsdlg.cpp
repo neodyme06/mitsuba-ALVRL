@@ -665,6 +665,8 @@ QStringList RenderSettingsDialog::validateConfiguration() const {
     if (samplerName != "independent") {
         if (integratorName == "pssmlt" || integratorName == "mlt")
             messages << "Error: Metropolis Light Transport-type algorithms only work with the independent sampler.";
+        if (integratorName == "vrl")
+            messages << "Error: Virtual Ray Lights integrator currenly requires the independent sampler."; // TODO: only needed for VRL tracing, could do VRL integration per pixel with other samplers...
         if (ui->aiBox->isChecked())
             messages << "Error: Adaptive integration requires the independent sampler.";
     }

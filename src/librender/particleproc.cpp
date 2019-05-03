@@ -201,6 +201,9 @@ void ParticleTracer::process(const WorkUnit *workUnit, WorkResult *workResult,
                 handleSurfaceInteraction(depth, nullInteractions, delta, its, medium, throughput*power);
 
                 BSDFSamplingRecord bRec(its, m_sampler, EImportance);
+                SLog(EInfo, "%s", m_sampler.toString().c_str());
+                SLog(EInfo, "%s", bRec.toString().c_str());
+                SLog(EInfo, "%s", bsdf->toString().c_str());
                 Spectrum bsdfWeight = bsdf->sample(bRec, m_sampler->next2D());
                 if (bsdfWeight.isZero())
                     break;

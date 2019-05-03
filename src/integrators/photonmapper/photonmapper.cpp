@@ -144,6 +144,7 @@ public:
              * that is based on a finite-sized prime number table
              */
             m_maxDepth = 128;
+            Log(EWarn, "Infinite maxDepth has been clipped to 128 due to photon tracing limitations!");
         }
 
         m_causticPhotonMapID = m_globalPhotonMapID = m_breID = 0;
@@ -228,13 +229,13 @@ public:
         m_invGlossySamples = 1.0f / m_glossySamples;
     }
 
-    bool preprocess(const Scene *scene, RenderQueue *queue, const RenderJob *job,
+    bool prepass(const Scene *scene, RenderQueue *queue, const RenderJob *job,
             int sceneResID, int sensorResID, int samplerResID) {
-        SamplingIntegrator::preprocess(scene, queue, job, sceneResID, sensorResID, samplerResID);
+        SamplingIntegrator::prepass(scene, queue, job, sceneResID, sensorResID, samplerResID);
         /* Create a deterministic sampler for the photon gathering step */
         ref<Scheduler> sched = Scheduler::getInstance();
         ref<Sampler> sampler = static_cast<Sampler *> (PluginManager::getInstance()->
-            createObject(MTS_CLASS(Sampler), Properties("halton")));
+            createObject(MTS_CLASS(Sampler), Properties("independent")));
         /* Create a sampler instance for every core */
         std::vector<SerializableObject *> samplers(sched->getCoreCount());
         for (size_t i=0; i<sched->getCoreCount(); ++i) {

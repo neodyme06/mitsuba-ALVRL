@@ -40,4 +40,6 @@ plugins += bidirEnv.SharedLibrary('erpt',
         ['erpt/erpt.cpp', 'erpt/erpt_proc.cpp']
 )
 
+plugins += env.SharedLibrary('vrl', ['vrl/vrlIntegrator.cpp', '#src/libbidir/rsampler.cpp']) # bake-in of rsampler is a bit hacky...?
+
 Export('plugins')

@@ -209,6 +209,15 @@
             It does not account for participating media, such as fog or smoke&mdash;see
             the volumetric path tracer if this is needed.
         </descr>
+        <param name="maxPasses" readableName="Maximum number of passes" type="integer" default="1" importance="1">
+            Number of passes for progressive integration. Set to -1 to 
+            render indefinitely.
+        </param>
+        <param name="dumpPasses" readableName="Dump intermediate passes" type="boolean" default="false" importance="1">
+            Dump intermediate pass files with time information encoded in 
+            the filename. TODO: (1) Currently only last pass is dumped! (2) 
+            Put time info in meta data instead of file name.
+        </param>
     </plugin>
 
     <plugin type="integrator" name="volpath_simple" readableName = "Volumetric path tracer (Simple)"
@@ -223,6 +232,10 @@
             highly glossy materials. In this case, please use the extended volumetric
             path tracer or one of the bidirectional techniques.
         </descr>
+        <param name="maxPasses" readableName="Number of passes" type="integer" default="1" importance="1">
+            Number of passes for progressive integration. Set to -1 to 
+            render indefinitely.
+        </param>
     </plugin>
 
     <plugin type="integrator" name="volpath" readableName = "Volumetric path tracer (Extended)"
@@ -235,6 +248,20 @@
             sampling strategies. On surfaces, this integrator behaves exactly
             like the standard path tracer.
         </descr>
+        <param name="maxPasses" readableName="Maximum number of passes" type="integer" default="1" importance="1">
+            Number of passes for progressive integration. Set to -1 to 
+            render indefinitely.
+        </param>
+        <param name="dumpPasses" readableName="Dump intermediate passes" type="boolean" default="false" importance="1">
+            Dump intermediate pass files with time information encoded in 
+            the filename. TODO: (1) Currently only last pass is dumped! (2) 
+            Put time info in meta data instead of file name.
+        </param>
+        <param name="onlyVRLpaths" readableName="onlyVRLpaths" type="boolean" default="true"></param>
+        <param name="vrlVolToVol" readableName="vrlVolToVol" type="boolean" default="true"></param>
+        <param name="vrlVolToSurf" readableName="vrlVolToSurf" type="boolean" default="true"></param>
+        <param name="internalSamples" readableName="internalSamples" type="integer" default="1"></param>
+        <param name="onlySingleScatter" readableName="onlySingleScatter" type="boolean" default="false"></param>
     </plugin>
 
     <plugin type="integrator" name="ptracer" readableName="Adjoint particle tracer" show="true"
@@ -324,6 +351,100 @@
         <param name="clamping" readableName="Clamping factor" type="float" default="0.1">Relative clamping factor (0=no clamping, 1=full clamping)</param>
     </plugin>
 
+    <plugin type="integrator" name="vrl" readableName = "Virtual Ray Light renderer"
+            show="true" className="vrlIntegrator" extends="MonteCarloIntegrator">
+        <descr>
+            Virtual Ray Light integrator for multiple scattering.
+        </descr>
+        <param name="maxPasses" readableName="maxPasses" type="integer" default="-1" importance="1">
+            Number of passes of the progressive integrator.
+        </param>
+        <param name="dumpPasses" readableName="dumpPasses" type="boolean" default="false" importance="1"></param>
+        <param name="shortVrls" readableName="shortVrls" type="boolean" default="true">
+            Short VRLs as opposed to infinitely long VRLs? (The latter are not fully tested.)
+        </param>
+        <param name="vrlTargetNum" readableName="vrlTargetNum" type="integer" default="500">
+            Number of VRLs that are generated per pass (approximately).
+        </param>
+        <param name="maxParticleDepth" readableName="maxParticleDepth" type="integer" default="-1">
+            Maximum depth of particles traced to generate the VRLs.
+        </param>
+        <param name="specularForcedRRdepth" readableName="specular chain depth where RR is forced" type="integer" default="100">
+            Depth at which a nonzero Russian Roulette stopping probability gets forced for specular chains.
+        </param>
+        <param name="initialSpecularThroughput" readableName="initial specular chain RR throughput" type="float" default="20">
+            Initial specular throughput for Russian Roulette decisions.
+        </param>
+
+        <param name="volVolSamples" readableName="vol-vol samples" type="integer" default="2">
+            Number of samples for VRL volume to volume transport. (Cannot 
+            be exactly 1 because we need to be able to estimate the 
+            variance.)
+        </param>
+        <param name="volSurfSamples" readableName="vol-surf samples" type="integer" default="2">
+            Number of samples for VRL volume to surface transport. (Cannot 
+            be exactly 1 because we need to be able to estimate the 
+            variance.)
+        </param>
+        <param name="globalCluster" readableName="globalCluster" type="boolean" default="false">
+            Perform an initial global clustering (that will be used as a 
+            starting point for later local refinement if requested)?
+        </param>
+        <param name="globalUndersampling" readableName="globalUndersampling" type="float" default="-1">
+            <p>Number of VRLs in initial global cluster = (number of vrls) / globalUnderSampling.</p>
+            <p>Setting this to a value of -1 will enable an adaptive method 
+                that tries to find the number of clusters that maximizes 
+                convergence.</p>
+        </param>
+
+        <param name="localRefinement" readableName="localRefinement" type="boolean" default="true">
+            Perform a local refinement/clustering of VRLs per slice?
+        </param>
+        <param name="localUndersampling" readableName="localUndersampling" type="float" default="-1">
+            <p>Number of VRLs in refined local cluster = (number of vrls) / localUnderSampling.</p>
+            <p>When setting this to a value of -1, the refinement happens 
+                adaptively to maximise the convergence.</p>
+        </param>
+        <param name="fallBackUndersampling" readableName="fallBackUndersampling" type="float" default="5">
+            <p>Number of VRLs in refined fall back cluster = (number of vrls) / fallBackUnderSampling.</p>
+            <p>The fall back clustering is used for gather points (pixels) 
+                that don't hit any geometry, and for slices that did not 
+                receive any contributing VRLs.</p>
+        </param>
+
+        <param name="targetNumSlices" readableName="Target number of slices" type="integer" default="100">
+            Target number of slices (each slice gets its own local VRL clustering if 'localRefinement' is active)
+        </param>
+        <param name="targetPixelUndersampling" readableName="targetPixelUndersampling" type="float" default="64">
+            Target pixel undersampling when sampling representative pixels 
+            within a slice.
+        </param>
+        <param name="sliceCurvatureFactor" readableName="sliceCurvatureFactor" type="float" default="0.5">
+            How much geometric curvature to take into account when grouping pixels into slices.
+        </param>
+        <param name="neighbourCount" readableName="neighbourCount" type="integer" default="0">
+            Use information of this many neighbouring slices when determining VRL clustering for the current slice.
+        </param>
+        <param name="neighbourWeight" readableName="neighbourWeight" type="float" default="0.0">
+            Relative weight of the neighbouring slices when determining VRL clustering for the current slice.
+        </param>
+
+        <param name="Rsamples" readableName="Rsamples" type="integer" default="1"></param>
+        <param name="depthCorrection" readableName="depthCorrection" type="float" default="1">
+            <p>For cluster refinement based on convergence constant 
+                minimization, this factor corrects the depth at which the 
+                clusters are split. Values greater than unity will force 
+                more splitting.</p>
+        </param>
+
+        <param name="numVrlFalseColor" readableName="numVrlFalseColor" type="boolean" default="false"></param>
+        <param name="slicesFalseColor" readableName="slicesFalseColor" type="boolean" default="false"></param>
+        <param name="convergenceFalseColor" readableName="convergenceFalseColor" type="boolean" default="false"></param>
+        <param name="vrlFile" readableName="Load VRLs from this file" type="string" default="">
+            Load VRLs from a file instead of generating them.
+        </param>
+    </plugin>
+
     <plugin type="integrator" name="photonmapper" readableName="Photon mapper" show="true"
             className="PhotonMapIntegrator" extends="SampleIntegrator">
         <descr>
@@ -340,6 +461,10 @@
                 <p>When the scene contains homogeneous participating media, the Beam Radiance Estimate by Jarosz et al.
                 is used to estimate the illumination due to volumetric scattering.</p>
         </descr>
+        <param name="maxPasses" readableName="Number of passes" type="integer" default="1" importance="1">
+            Number of passes for progressive integration. Set to -1 to 
+            render indefinitely.
+        </param>
         <param name="directSamples" readableName="Direct samples" type="integer" default="16">Number of luminaire samples for direct illumination</param>
         <param name="glossySamples" readableName="Glossy samples" type="integer" default="32">Number of glossy samples for direct illumination</param>
         <param name="maxDepth" readableName="Maximum depth" type="integer" default="-1">
@@ -495,6 +620,9 @@
             Specifies the minimum path depth, after which the implementation will start to use the
             "russian roulette" path termination criterion (set to <tt>-1</tt> to disable).
         </param>
+        <param name="onlyVRLpaths" readableName="onlyVRLpaths" type="boolean" default="true"></param>
+        <param name="vrlVolToVol" readableName="vrlVolToVol" type="boolean" default="true"></param>
+        <param name="vrlVolToSurf" readableName="vrlVolToSurf" type="boolean" default="true"></param>
     </plugin>
 
     <plugin type="integrator" name="pssmlt" readableName="Primary Sample Space MLT" show="true"

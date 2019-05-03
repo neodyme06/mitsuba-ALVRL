@@ -268,6 +268,76 @@ template <typename DataType, typename IndexType> void permute_inplace(
     }
 }
 
+/**
+ * \brief Create a cumulative histogram from a non-empty set of weights.
+ *
+ * Useful for sampling according to some set of weights.
+ *
+ * Given a set of weights [1 4 3 2], the cumulative histogram becomes [0.1
+ * 0.5 0.8 1.0].
+ *
+ * \param weights The weights (need not be normalized)
+ * \param cumul   The returned cumulative histogram
+ */
+// TODO this already exists in Mitsuba's discrete distribution!
+inline void makeCumulativeHistogram(const std::vector<Float> &weights, std::vector<Float> &cumul) {
+    cumul.resize(weights.size());
+    Float weightSum = 0.0f;
+    for (size_t i = 0; i < weights.size(); i++)
+        weightSum += weights[i];
+    cumul[0] = weights[0] / weightSum;
+    for (size_t i = 1; i < weights.size(); i++)
+        cumul[i] = cumul[i-1] + weights[i]/weightSum;
+    cumul[weights.size() - 1] = 1; // protect against round-off problems
+}
+
+/**
+ * \brief Binary search in cumulative histogram.
+ *
+ * Performs a binary search in cumulative histogram bins. Useful for
+ * sampling from a histogram.
+ *
+ * Given a histogram with frequencies [0.1 0.4 0.3 0.2], the cumulative
+ * bins should be [0.1 0.5 0.8 1.0]. If x is then sampled from a uniform
+ * distribution between 0 and 1, the returned bin indices are distributed
+ * according to the histogram frequencies.
+ *
+ * \param cumul The cumulative bins
+ * \param x     The value whose bin to search
+ * \param prob  If not NULL: the probability assigned to the returend bin
+ * \return      The index of the bin that encloses x
+ */
+// TODO this already exists in Mitsuba's discrete distribution!
+inline size_t binaryBinSearch(const std::vector<Float> &cumul, Float x, Float *prob = NULL) {
+    // invar: cumul[lo] <= x <= cumul[hi]
+    // with an implicit zero cumul weight at index '-1'
+    // The bin with index 'hi' is the one we need.
+    size_t lo = 0;
+    size_t hi = cumul.size() - 1;
+    // special case:
+    if (x <= cumul[0]) {
+        hi = 0;
+    } else {
+        while (lo < hi - 1) {
+            size_t m = lo + (hi - lo)/2;
+            if (x < cumul[m]) {
+                hi = m;
+            } else {
+                lo = m;
+            }
+        }
+    }
+    // hi points to the correct bin
+    if (prob) {
+        if (hi == 0) {
+            *prob = cumul[0];
+        } else {
+            *prob = cumul[hi] - cumul[hi-1];
+        }
+    }
+    return hi;
+}
+
 //! @}
 // -----------------------------------------------------------------------
 

@@ -113,7 +113,7 @@ int main(int argc, char **argv) {
 
 	/* Calculate the total required area in square pixels */
 	uint32_t area = 256 * maxWidth * maxHeight;
-	
+
 	/* Side length of the square bitmap */
 	uint32_t finalSide = 0, side = (uint32_t) sqrtf(area);
 
@@ -125,7 +125,7 @@ int main(int argc, char **argv) {
 		finalSide = 1 << i;
 	}
 
-	if (finalSide < side) 
+	if (finalSide < side)
 		SLog(EError, "The requested font bitmap is bigger than 4096x4096!");
 
 	cout << "Final res.  : " << finalSide << endl;
@@ -143,7 +143,7 @@ int main(int argc, char **argv) {
 	for (uint32_t i=0; i<256; i++) {
 		//int index = FT_Get_Char_Index(face, i);
 		int index = i;
-		if (FT_Load_Char(face, index, FT_LOAD_RENDER)) 
+		if (FT_Load_Char(face, index, FT_LOAD_RENDER))
 			continue;
 
 		/* Calculate the tile index in the texture */

@@ -107,14 +107,18 @@ static StatsCounter avgPathLength("Path tracer", "Average path length", EAverage
  *    one of the photon mappers may be preferable.
  * }
  */
-class MIPathTracer : public MonteCarloIntegrator {
+class MIPathTracer : public ProgressiveMonteCarloIntegrator {
 public:
     MIPathTracer(const Properties &props)
-        : MonteCarloIntegrator(props) { }
+        : ProgressiveMonteCarloIntegrator(props) { }
 
     /// Unserialize from a binary data stream
     MIPathTracer(Stream *stream, InstanceManager *manager)
-        : MonteCarloIntegrator(stream, manager) { }
+        : ProgressiveMonteCarloIntegrator(stream, manager) { }
+
+    virtual bool prepass(const Scene *scene, Sampler *sampler) {
+        return true;
+    }
 
     Spectrum Li(const RayDifferential &r, RadianceQueryRecord &rRec) const {
         /* Some aliases and local variables */
@@ -300,7 +304,7 @@ public:
     }
 
     void serialize(Stream *stream, InstanceManager *manager) const {
-        MonteCarloIntegrator::serialize(stream, manager);
+        ProgressiveMonteCarloIntegrator::serialize(stream, manager);
     }
 
     std::string toString() const {
@@ -316,6 +320,6 @@ public:
     MTS_DECLARE_CLASS()
 };
 
-MTS_IMPLEMENT_CLASS_S(MIPathTracer, false, MonteCarloIntegrator)
+MTS_IMPLEMENT_CLASS_S(MIPathTracer, false, ProgressiveMonteCarloIntegrator)
 MTS_EXPORT_PLUGIN(MIPathTracer, "MI path tracer");
 MTS_NAMESPACE_END

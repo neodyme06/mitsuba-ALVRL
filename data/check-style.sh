@@ -14,6 +14,8 @@
 # Invoke as: tools/check-style.sh
 #
 
+shopt -s globstar
+
 errors=0
 IFS=$'\n'
 found=

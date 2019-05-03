@@ -1,22 +1,36 @@
-Mitsuba — Physically Based Renderer
-===================================
-
-http://mitsuba-renderer.org/
+Mitsuba — Adaptive Lightslice for Virtual Ray Lights Branch
+===========================================================
 
 ## About
 
-Mitsuba is a research-oriented rendering system in the style of PBRT, from which it derives much inspiration. It is written in portable C++, implements unbiased as well as biased techniques, and contains heavy optimizations targeted towards current CPU architectures. Mitsuba is extremely modular: it consists of a small set of core libraries and over 100 different plugins that implement functionality ranging from materials and light sources to complete rendering algorithms.
+This branch holds the Mitsuba code for Adaptive Lightslice for Virtual Ray 
+Lights, as introduced in the paper:
 
-In comparison to other open source renderers, Mitsuba places a strong emphasis on experimental rendering techniques, such as path-based formulations of Metropolis Light Transport and volumetric modeling approaches. Thus, it may be of genuine interest to those who would like to experiment with such techniques that haven't yet found their way into mainstream renderers, and it also provides a solid foundation for research in this domain.
+> Frederickx Roald, Pieterjan Bartels, and Philip Dutré.  
+> "Adaptive LightSlice for Virtual Ray Lights."  
+> EUROGRAPHICS 2015-Short Papers (2015): 61-64.  
 
-The renderer currently runs on Linux, MacOS X and Microsoft Windows and makes use of SSE2 optimizations on x86 and x86_64 platforms. So far, its main use has been as a testbed for algorithm development in computer graphics, but there are many other interesting applications.
+NOTE1: This is (CPU-only) 'research code', so it isn't very polished or 
+optimized ;-).
 
-Mitsuba comes with a command-line interface as well as a graphical frontend to interactively explore scenes. While navigating, a rough preview is shown that becomes increasingly accurate as soon as all movements are stopped. Once a viewpoint has been chosen, a wide range of rendering techniques can be used to generate images, and their parameters can be tuned from within the program.
+NOTE2: The VRL integration sampling is not phase-function aware. 
+Non-isotropic phase functions will need higher 'volVolSamples' and 
+'volSurfSamples' (and are not fully tested).
+
+NOTE3: The VRL renderer only handles the multiple scattering contribution 
+and needs to be augmented with direct transmission and single scattering to 
+obtain the full light transport.
+
 
 ## Documentation
 
-For compilation, usage, and a full plugin reference, please see the [official documentation](http://mitsuba-renderer.org/docs.html).
+See the Adaptive Lightslice paper for more information on the algorithm.
+For compilation, usage, and a full plugin reference of Mitsuba, please see 
+the [official Mitsuba documentation](http://mitsuba-renderer.org/docs.html).
 
-## Releases and scenes
 
-Pre-built binaries, as well as example scenes, are available on the [Mitsuba website](http://mitsuba-renderer.org/download.html).
+## Example scenes
+
+Example scenes are available on the
+[project website](http://graphics.cs.kuleuven.be/publications/FBD15ALVRL/).
+
